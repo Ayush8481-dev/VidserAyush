@@ -9,8 +9,8 @@ export default async function handler(req, res) {
   // 2. Add your multiple API keys here. The code will pick one randomly per request.
   const apiKeys =[
     "d1edce158amshec139440d20658ap1f2545jsnbb7da9add82f",
-    "YOUR_SECOND_KEY_HERE", // <-- Replace with actual keys
-    "YOUR_THIRD_KEY_HERE"   // <-- Keep adding as many as you need
+    "", // <-- Replace with actual keys
+    ""   // <-- Keep adding as many as you need
   ];
 
   // Select a random key from the array
