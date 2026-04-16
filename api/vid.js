@@ -6,11 +6,11 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Video ID is required. Example: /api/vid?id=UxxajLWwzqY" });
   }
 
-  // 2. Add your multiple API keys here. The code will pick one randomly per request.
+  // 2. Add your multiple API keys here
   const apiKeys =[
     "d1edce158amshec139440d20658ap1f2545jsnbb7da9add82f",
-    "", // <-- Replace with actual keys
-    ""   // <-- Keep adding as many as you need
+    // "YOUR_SECOND_KEY_HERE", 
+    // "YOUR_THIRD_KEY_HERE"
   ];
 
   // Select a random key from the array
@@ -29,39 +29,72 @@ export default async function handler(req, res) {
 
     const data = await fetchResponse.json();
 
-    // Note: RapidAPI structures can vary. Usually, the streams are under an array like `data.formats`, `data.links`, or `data.data`.
-    // Change `data.formats` below if the API uses a different object name.
-    const formats = data.formats || data.links || data.data || [];
+    // Catch API level errors (like rate limits or invalid IDs)
+    if (data.status !== "OK") {
+      return res.status(400).json({ error: "API returned an error", details: data });
+    }
 
     const videoResult =[];
     const audioResult =[];
 
-    // 4. Filter and format the response
-    if (Array.isArray(formats)) {
-      formats.forEach(item => {
-        // Checking if the item has video and audio properties
-        // You may need to adapt 'item.hasVideo' depending on the exact RapidAPI JSON property names
-        const hasVideo = item.hasVideo === true || item.videoCodec !== null;
-        const hasAudio = item.hasAudio === true || item.audioCodec !== null;
+    // Combine standard formats (usually Video+Audio) and adaptiveFormats (usually separated Audio or Video)
+    const allFormats = [
+      ...(data.formats || []),
+      ...(data.adaptiveFormats ||[])
+    ];
 
-        // Give ONLY video WITH audio
-        if (hasVideo && hasAudio) {
-          videoResult.push({
-            Quality: item.qualityLabel || item.quality || "Unknown",
-            Size: item.contentLength || item.size || "Unknown",
-            Link: item.url || item.link || ""
-          });
-        } 
-        // Give Audio ONLY
-        else if (!hasVideo && hasAudio) {
-          audioResult.push({
-            Quality: item.audioQuality || item.quality || item.bitrate || "Unknown",
-            Size: item.contentLength || item.size || "Unknown",
-            Link: item.url || item.link || ""
-          });
-        }
-      });
-    }
+    // Helper function to format bytes to MB
+    const formatBytes = (bytes) => {
+      if (!bytes) return "Unknown";
+      const mb = (parseInt(bytes) / (1024 * 1024)).toFixed(2);
+      return `${mb} MB`;
+    };
+
+    // 4. Filter and format the response
+    allFormats.forEach(item => {
+      const mimeType = item.mimeType || "";
+      
+      // Determine if the stream contains Video
+      // (It has a width attribute OR mimeType starts with 'video/')
+      const hasVideo = typeof item.width !== 'undefined' || mimeType.startsWith('video/');
+      
+      // Determine if the stream contains Audio
+      // (It has an audioQuality attribute OR mimeType starts with 'audio/' OR the codecs include 'mp4a' which is audio)
+      const hasAudio = typeof item.audioQuality !== 'undefined' || mimeType.startsWith('audio/') || mimeType.includes('mp4a');
+
+      // Calculate file size. (Standard 'formats' often lack contentLength, so we calculate it from bitrate if missing)
+      let sizeStr = formatBytes(item.contentLength);
+      if (!item.contentLength && item.bitrate && item.approxDurationMs) {
+        const estimatedBytes = (parseInt(item.bitrate) * (parseInt(item.approxDurationMs) / 1000)) / 8;
+        sizeStr = formatBytes(estimatedBytes) + " (Estimated)";
+      }
+
+      // Clean up mimeType for output (e.g., "video/mp4; codecs=..." becomes "video/mp4")
+      const formatType = mimeType.split(';')[0] || "Unknown";
+
+      // --- Give ONLY video WITH audio ---
+      if (hasVideo && hasAudio) {
+        videoResult.push({
+          Quality: item.qualityLabel || "Unknown",
+          Format: formatType,
+          Size: sizeStr,
+          Link: item.url || ""
+        });
+      } 
+      
+      // --- Give Audio ONLY ---
+      else if (!hasVideo && hasAudio) {
+        // Format the audio quality nicely (e.g., AUDIO_QUALITY_LOW -> LOW) or fallback to Bitrate
+        let audioQ = item.audioQuality ? item.audioQuality.replace('AUDIO_QUALITY_', '') : `${Math.round(item.bitrate / 1000)}kbps`;
+        
+        audioResult.push({
+          Quality: audioQ,
+          Format: formatType,
+          Size: sizeStr,
+          Link: item.url || ""
+        });
+      }
+    });
 
     // 5. Send the filtered response
     return res.status(200).json({
